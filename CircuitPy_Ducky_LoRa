@@ -1,0 +1,114 @@
+# SPDX-FileCopyrightText: 2024 ladyada for Adafruit Industries & Kody Kinzie for Retia
+# SPDX-License-Identifier: MIT
+
+# demo of sending and recieving data with the RFM95 LoRa radio to trigger a payload
+# payload must be saved in advance as "payload.txt" on the circuitpython device
+# Pinout is for the NEW V3 Nugget (esp32s3) and LoRa SPI RFM95w breakout
+
+import board
+import busio
+import digitalio
+import neopixel
+import adafruit_rfm9x
+import displayio
+import terminalio
+from adafruit_display_text import label
+from adafruit_displayio_sh1106 import SH1106
+import neopixel
+import time
+from adafruit_hid.keyboard import Keyboard
+from adafruit_hid.keyboard_layout_us import KeyboardLayoutUS
+import usb_hid
+import adafruit_ducky
+
+time.sleep(1)  # Sleep for a bit to avoid a race condition on some systems
+keyboard = Keyboard(usb_hid.devices)
+keyboard_layout = KeyboardLayoutUS(keyboard)  # We're in the US :)
+duck = adafruit_ducky.Ducky("duckyscript.txt", keyboard, keyboard_layout)
+
+def RickMe():
+    result = True
+    while result is not False:
+        result = duck.loop()
+
+# Release any resources currently in use for the displays
+displayio.release_displays()
+
+i2c = busio.I2C(scl=board.SCL, sda=board.SDA)
+display_bus = displayio.I2CDisplay(i2c, device_address=0x3C)
+
+# Define the width and height of the display
+WIDTH = 130
+HEIGHT = 64
+display = SH1106(display_bus, width=WIDTH, height=HEIGHT, rotation=180)
+
+pixel = neopixel.NeoPixel(board.IO10, 2, brightness=0.2)
+pixel[0] = (0,0,255)  # equivalent
+pixel[1] = (0,0,255)  # equivalent
+
+# Define radio parameters.
+RADIO_FREQ_MHZ = 915.0  # Frequency of the radio in Mhz. Must match your
+# module! Can be a value like 915.0, 433.0, etc.
+
+# Define pins connected to the chip, use these if wiring up the breakout according to the guide:
+CS = digitalio.DigitalInOut(board.IO34)
+RESET = digitalio.DigitalInOut(board.IO5)
+# Or uncomment and instead use these if using a Feather M0 RFM9x board and the appropriate
+# CircuitPython build:
+# CS = digitalio.DigitalInOut(board.RFM9X_CS)
+# RESET = digitalio.DigitalInOut(board.RFM9X_RST)
+
+
+# Initialize SPI bus.
+spi = busio.SPI(board.IO15, MOSI=board.IO21, MISO=board.IO17)
+
+# Initialze RFM radio
+rfm9x = adafruit_rfm9x.RFM9x(spi, CS, RESET, RADIO_FREQ_MHZ)
+
+# Note that the radio is configured in LoRa mode so you can't control sync
+# word, encryption, frequency deviation, or other settings!
+
+# You can however adjust the transmit power (in dB).  The default is 13 dB but
+# high power radios like the RFM95 can go up to 23 dB:
+rfm9x.tx_power = 23
+
+# Send a packet.  Note you can only send a packet up to 252 bytes in length.
+# This is a limitation of the radio packet size, so if you need to send larger
+# amounts of data you will need to break it into smaller send calls.  Each send
+# call will wait for the previous one to finish before continuing.
+rfm9x.send(bytes("rickme", "utf-8"))
+print("Sent Ping message!")
+# Wait to receive packets.  Note that this library can't receive data at a fast
+# rate, in fact it can only receive and process one 252 byte packet at a time.
+# This means you should only use this for low bandwidth scenarios, like sending
+# and receiving a single message at a time.
+#print("Waiting for packets...")
+
+while True:
+    packet = rfm9x.receive()
+    # Optionally change the receive timeout from its default of 0.5 seconds:
+    # packet = rfm9x.receive(timeout=5.0)
+    # If no packet was received during the timeout then None is returned.
+    if packet is None:
+        # Packet has not been received
+        pixel[0] = (255,0,0)  # equivalent
+        pixel[1] = (255,0,0)  # equivalent
+        #print("Received nothing! Listening again...")
+    else:
+        # Received a packet!
+        pixel[0] = (0,255,0)  # equivalent
+        # Print out the raw bytes of the packet:
+        print("Received (raw bytes): {0}".format(packet))
+        # And decode to ASCII text and print it too.  Note that you always
+        # receive raw bytes and need to convert to a text format like ASCII
+        # if you intend to do string processing on your data.  Make sure the
+        # sending side is sending ASCII data before you try to decode!
+        packet_text = str(packet, "ascii")
+        print("Received (ASCII): {0}".format(packet_text))
+        # Also read the RSSI (signal strength) of the last received message and
+        # print it.
+        rssi = rfm9x.last_rssi
+        print("Received signal strength: {0} dB".format(rssi))
+        if "rickme" in packet_text:
+            RickMe()
+        #time.sleep(3)
