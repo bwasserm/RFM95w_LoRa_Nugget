@@ -1,0 +1,8 @@
+{
+    "configuration": "CDCOnBoot=default,MSCOnBoot=default,DFUOnBoot=default,PartitionScheme=default,DebugLevel=none,EraseFlash=none",
+    "board": "esp32:esp32:lolin_s2_mini",
+    "sketch": "LoRa_Reciever_Screen\\LoRa_Reciever_Screen.ino",
+    "port": "COM4",
+    "programmer": "esptool",
+    "output": "../build"
+}
