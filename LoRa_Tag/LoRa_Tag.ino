@@ -36,8 +36,8 @@
 // States
 #define STATE_INIT 0
 #define STATE_GAME_SEARCH 1
-#define PLAYING 2
-#define TAGGING 3
+#define STATE_PLAYING 2
+#define STATE_TAGGING 3
 
 uint8_t current_state;
 
@@ -54,7 +54,8 @@ int my_range = 60;
 int last_button = 0;
 uint8_t game_number = 0;
 
-struct Player {
+struct Player
+{
     uint32_t id;
     int8_t health;
     uint8_t red;
@@ -74,7 +75,11 @@ uint8_t last_bcast_player_idx = 0;
 #define ITEM_POKE 4
 #define ITEM_ACK 5
 
-struct Packet {
+#define PACKET_HEADER_SYNC 0xCAFEB0BACAFEB0BA
+
+struct Packet
+{
+    uint64_t header_sync;
     uint32_t src_id;
     uint32_t dst_id;
     uint32_t other_id;
@@ -89,6 +94,11 @@ struct Packet {
     char name[MAX_NAME_LEN];
 };
 
+union PacketSerdes
+{
+    Packet packet;
+    unsigned char bytes[sizeof(Packet)];
+};
 
 void setup()
 {
@@ -121,7 +131,8 @@ void setup()
 
     // Set up game state
     my_health = 3;
-    for(int player_idx = 0; player_idx < MAX_PLAYERS; player_idx++){
+    for (int player_idx = 0; player_idx < MAX_PLAYERS; player_idx++)
+    {
         players[player_idx].id = 0;
         players[player_idx].health = 0;
         players[player_idx].red = 0;
@@ -154,32 +165,11 @@ void setup()
     display.display();
     delay(2000);
 
-    current_state = STATE_INIT
+    current_state = STATE_INIT;
 }
 
 void loop()
 {
-    int packetSize = LoRa.parsePacket();
-    String lora_data;
-    if (packetSize)
-    {
-        // Red color when a message is received
-        pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-        pixels.show();
-
-        while (LoRa.available())
-        {
-            lora_data = LoRa.readString();
-        }
-        int packet_rssi = LoRa.packetRssi();
-        int packet_snr = LoRa.packetSnr();
-
-        num_packets_received++;
-
-        update_ui(packet_rssi, lora_data);
-    }
-    update_ui(0, String("Nothing yet"));
-
     // Read buttons
     // if(last_button == 0 && digitalRead(BTN_UP))
 }
@@ -228,7 +218,8 @@ String get_name(uint32_t uuid)
         name_end_idx = names.length();
     }
     // Truncate names that are too long.
-    if(name_end_idx - name_start_idx > MAX_NAME_LEN){
+    if (name_end_idx - name_start_idx > MAX_NAME_LEN)
+    {
         name_end_idx = name_start_idx + MAX_NAME_LEN;
     }
     String name = names.substring(name_start_idx + 1, name_end_idx);
@@ -257,13 +248,80 @@ void update_ui(int last_rssi, String last_packet)
     display.println(last_packet);
     display.display();
 
-    if (my_health > 0)  // Still alive
+    if (my_health > 0) // Still alive
     {
         pixels.setPixelColor(0, pixels.Color(0, 32, 0));
     }
-    else  // dead
+    else // dead
     {
         pixels.setPixelColor(0, pixels.Color(32, 0, 0));
     }
     pixels.show();
+}
+
+void state_machine_update()
+{
+    switch (current_state)
+    {
+    case STATE_INIT:
+        break;
+    case STATE_GAME_SEARCH:
+        break;
+    case STATE_PLAYING:
+        break;
+    case STATE_TAGGING:
+        break;
+    default:
+        break;
+    }
+}
+
+void update_players(uint32_t other_id, int8_t other_health)
+{
+}
+
+void rx_packets()
+{
+    int packetSize = LoRa.parsePacket();
+    String lora_data;
+    if (packetSize)
+    {
+        // Red color when a message is received
+        pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+        pixels.show();
+        while (LoRa.available())
+        {
+            lora_data = LoRa.readString();
+            int packet_rssi = LoRa.packetRssi();
+            int packet_snr = LoRa.packetSnr();
+
+            num_packets_received++;
+
+            PacketSerdes serdes;
+            if (lora_data.length() != sizeof(Packet))
+            {
+                update_ui(lora_data.length(), "Packet Wrong Size");
+                continue;
+            }
+
+            lora_data.getBytes(serdes.bytes, sizeof(PacketSerdes));
+            if (serdes.packet.header_sync != PACKET_HEADER_SYNC)
+            {
+                update_ui(0, "Wrong header");
+                continue;
+            }
+            if (game_number != serdes.packet.game_number)
+            {
+                if (game_number == 0)
+                {
+                    game_number = serdes.packet.game_number;
+                }
+                else
+                {
+                    update_ui(serdes.packet.game_number, "Unknown game number");
+                    continue;
+                }
+            }
+        }
+    }
 }
