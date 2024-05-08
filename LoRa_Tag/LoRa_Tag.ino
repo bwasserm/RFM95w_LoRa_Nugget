@@ -53,6 +53,7 @@ int8_t my_health;
 int my_range = 60;
 int last_button = 0;
 uint8_t game_number = 0;
+uint16_t tx_sequence_num = 0;
 
 struct Player
 {
@@ -68,14 +69,15 @@ uint8_t num_players = 0;
 uint8_t last_bcast_player_idx = 0;
 
 // Actions
-#define HEARTBEAT 0
-#define TAG 1
-#define ACK 2
-#define NACK 3
-#define ITEM_POKE 4
-#define ITEM_ACK 5
+#define ACTION_UNKNOWN 0
+#define ACTION_HEARTBEAT 1
+#define ACTION_TAG 2
+#define ACTION_ACK 3
+#define ACTION_NACK 4
+#define ACTION_ITEM_POKE 5
+#define ACTION_ITEM_ACK 6
 
-#define PACKET_HEADER_SYNC 0xCAFEB0BACAFEB0BA
+#define PACKET_HEADER_SYNC 0xCAFEB0BADEADBEEF
 
 struct Packet
 {
@@ -92,11 +94,12 @@ struct Packet
     uint8_t green;
     uint8_t blue;
     char name[MAX_NAME_LEN];
+    char null_term;
 };
 
 union PacketSerdes
 {
-    Packet packet;
+    Packet frame;
     unsigned char bytes[sizeof(Packet)];
 };
 
@@ -128,6 +131,9 @@ void setup()
 
     my_id = get_chip_id();
     my_name = get_name(my_id);
+
+    Serial.print("Tag packet size: ");
+    Serial.println(sizeof(PacketSerdes));
 
     // Set up game state
     my_health = 3;
@@ -166,12 +172,6 @@ void setup()
     delay(2000);
 
     current_state = STATE_INIT;
-}
-
-void loop()
-{
-    // Read buttons
-    // if(last_button == 0 && digitalRead(BTN_UP))
 }
 
 uint32_t get_chip_id()
@@ -280,6 +280,71 @@ void update_players(uint32_t other_id, int8_t other_health)
 {
 }
 
+// COBS encoder and decoder stolen from https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing
+/** COBS encode data to buffer
+  @param data Pointer to input data to encode
+  @param length Number of bytes to encode
+  @param buffer Pointer to encoded output buffer
+  @return Encoded buffer length in bytes
+  @note Does not output delimiter byte
+*/
+size_t cobsEncode(const void *data, size_t length, uint8_t *buffer)
+{
+  assert(data && buffer);
+
+  uint8_t *encode = buffer; // Encoded byte pointer
+  uint8_t *codep = encode++; // Output code pointer
+  uint8_t code = 1; // Code value
+
+  for (const uint8_t *byte = (const uint8_t *)data; length--; ++byte)
+  {
+    if (*byte) // Byte not zero, write it
+      *encode++ = *byte, ++code;
+
+    if (!*byte || code == 0xff) // Input is zero or block completed, restart
+    {
+      *codep = code, code = 1, codep = encode;
+      if (!*byte || length)
+        ++encode;
+    }
+  }
+  *codep = code; // Write final code value
+
+  return (size_t)(encode - buffer);
+}
+
+/** COBS decode data from buffer
+  @param buffer Pointer to encoded input bytes
+  @param length Number of bytes to decode
+  @param data Pointer to decoded output data
+  @return Number of bytes successfully decoded
+  @note Stops decoding if delimiter byte is found
+*/
+size_t cobsDecode(const uint8_t *buffer, size_t length, void *data)
+{
+  assert(buffer && data);
+
+  const uint8_t *byte = buffer; // Encoded input byte pointer
+  uint8_t *decode = (uint8_t *)data; // Decoded output byte pointer
+
+  for (uint8_t code = 0xff, block = 0; byte < buffer + length; --block)
+  {
+    if (block) // Decode block byte
+      *decode++ = *byte++;
+    else
+    {
+      block = *byte++;             // Fetch the next block length
+      if (block && (code != 0xff)) // Encoded zero, write it unless it's delimiter.
+        *decode++ = 0;
+      code = block;
+      if (!code) // Delimiter code found
+        break;
+    }
+  }
+
+  return (size_t)(decode - (uint8_t *)data);
+}
+
 void rx_packets()
 {
     int packetSize = LoRa.parsePacket();
@@ -296,32 +361,149 @@ void rx_packets()
             int packet_snr = LoRa.packetSnr();
 
             num_packets_received++;
+            update_ui(num_packets_received, "Got a packet");
+
+            Serial.println("Got a packet!");
+            for(int c = 0; c < lora_data.length(); c++){
+                Serial.print(lora_data[c], HEX);
+            }
+            Serial.println("");
+            Serial.print("RSSI: ");
+            Serial.println(packet_rssi);
+            Serial.print("Length: ");
+            Serial.println(lora_data.length());
 
             PacketSerdes serdes;
-            if (lora_data.length() != sizeof(Packet))
+            if (lora_data.length() != sizeof(PacketSerdes) + 1)
             {
                 update_ui(lora_data.length(), "Packet Wrong Size");
                 continue;
             }
 
-            lora_data.getBytes(serdes.bytes, sizeof(PacketSerdes));
-            if (serdes.packet.header_sync != PACKET_HEADER_SYNC)
+            uint8_t buffer[sizeof(PacketSerdes) + 2];
+            lora_data.getBytes(buffer, sizeof(PacketSerdes) + 2);
+            int num_bytes_decoded = cobsDecode(buffer, sizeof(PacketSerdes) + 1, (void *)(serdes.bytes));
+            Serial.print("Decoded ");
+            Serial.print(num_bytes_decoded);
+            Serial.println(" bytes");
+
+            Serial.print("Header: ");
+            Serial.println(serdes.frame.header_sync, HEX);
+            Serial.print("Src ID: ");
+            Serial.println(serdes.frame.src_id);
+            Serial.print("Dst ID: ");
+            Serial.println(serdes.frame.dst_id);
+            Serial.print("Oth ID: ");
+            Serial.println(serdes.frame.other_id);
+            Serial.print("Seq num: ");
+            Serial.println(serdes.frame.sequence_num);
+            Serial.print("Game num: ");
+            Serial.println(serdes.frame.game_number);
+            Serial.print("Action: ");
+            switch(serdes.frame.action) {
+                case ACTION_UNKNOWN:
+                    Serial.println("UNKNOWN");
+                    break;
+                case ACTION_HEARTBEAT:
+                    Serial.println("HEARTBEAT");
+                    break;
+                case ACTION_TAG:
+                    Serial.println("TAG");
+                    break;
+                case ACTION_ACK:
+                    Serial.println("ACK");
+                    break;
+                case ACTION_NACK:
+                    Serial.println("NACK");
+                    break;
+                case ACTION_ITEM_POKE:
+                    Serial.println("ITEM_POKE");
+                    break;
+                case ACTION_ITEM_ACK:
+                    Serial.println("ITEM_ACK");
+                    break;
+                default:
+                    Serial.println(serdes.frame.action);
+            }
+            Serial.print("Src health: ");
+            Serial.println(serdes.frame.src_health);
+            Serial.print("Oth health: ");
+            Serial.println(serdes.frame.other_health);
+            Serial.print("Red: ");
+            Serial.println(serdes.frame.red);
+            Serial.print("Grn: ");
+            Serial.println(serdes.frame.green);
+            Serial.print("Blu: ");
+            Serial.println(serdes.frame.blue);
+
+            if (serdes.frame.header_sync != PACKET_HEADER_SYNC)
             {
                 update_ui(0, "Wrong header");
                 continue;
             }
-            if (game_number != serdes.packet.game_number)
+            if (game_number != serdes.frame.game_number)
             {
                 if (game_number == 0)
                 {
-                    game_number = serdes.packet.game_number;
+                    game_number = serdes.frame.game_number;
                 }
                 else
                 {
-                    update_ui(serdes.packet.game_number, "Unknown game number");
+                    update_ui(serdes.frame.game_number, "Unknown game number");
                     continue;
                 }
             }
         }
     }
+}
+
+void tx_packet()
+{
+    PacketSerdes serdes;
+    serdes.frame.header_sync = PACKET_HEADER_SYNC;
+    serdes.frame.src_id = my_id;
+    serdes.frame.dst_id = 0xDEADBEEF;
+    serdes.frame.other_id = 0xFACECAFE;
+    serdes.frame.sequence_num = tx_sequence_num++;
+    serdes.frame.game_number = game_number;
+    serdes.frame.action = ACTION_HEARTBEAT;
+    serdes.frame.src_health = my_health;
+    serdes.frame.other_health = -1;
+    serdes.frame.red = 0xFF;
+    serdes.frame.green = 0xFF;
+    serdes.frame.blue = 0xFF;
+//    my_name.getBytes(serdes.frame.name, 8);
+    serdes.frame.null_term = '\0';
+    // char packet[sizeof(PacketSerdes)]
+    uint8_t buffer[sizeof(PacketSerdes) + 2];
+    int num_bytes_encoded = cobsEncode((void *)(serdes.bytes), sizeof(PacketSerdes), buffer);
+    if (num_bytes_encoded != sizeof(PacketSerdes) + 1) {
+        Serial.print("COBS encoded to ");
+        Serial.print(num_bytes_encoded);
+        Serial.print(" bytes, expected ");
+        Serial.println(sizeof(PacketSerdes));
+    }
+    // Null-terminate the packet
+    buffer[sizeof(PacketSerdes) + 1] = '\0';
+    String message = String((char *)buffer);
+
+    // Send packet via LoRa
+    LoRa.beginPacket();
+    LoRa.print(message);
+    LoRa.endPacket();
+}
+
+int tx_counter = 0;
+int tx_decimator = 10;
+
+void loop()
+{
+    // Read buttons
+    // if(last_button == 0 && digitalRead(BTN_UP))
+    if (tx_counter % tx_decimator == 0) {
+      tx_packet(); 
+    }
+    rx_packets();
+    delay(100);
+    tx_counter++;
 }
