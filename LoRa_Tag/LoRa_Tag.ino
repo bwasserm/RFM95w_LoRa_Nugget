@@ -50,10 +50,14 @@ int num_packets_received = 0;
 uint32_t my_id = 0;
 String my_name;
 int8_t my_health;
+#define FULL_HEALTH 3
 int my_range = 60;
 int last_button = 0;
 uint8_t game_number = 0;
 uint16_t tx_sequence_num = 0;
+uint8_t my_red = 0;
+uint8_t my_green = 0;
+uint8_t my_blue = 0;
 
 struct Player
 {
@@ -93,14 +97,8 @@ struct Packet
     uint8_t red;
     uint8_t green;
     uint8_t blue;
-    char name[MAX_NAME_LEN];
+    byte name[MAX_NAME_LEN];
     char null_term;
-};
-
-union PacketSerdes
-{
-    Packet frame;
-    unsigned char bytes[sizeof(Packet)];
 };
 
 void setup()
@@ -133,10 +131,9 @@ void setup()
     my_name = get_name(my_id);
 
     Serial.print("Tag packet size: ");
-    Serial.println(sizeof(PacketSerdes));
+    Serial.println(sizeof(Packet));
 
     // Set up game state
-    my_health = 3;
     for (int player_idx = 0; player_idx < MAX_PLAYERS; player_idx++)
     {
         players[player_idx].id = 0;
@@ -170,6 +167,7 @@ void setup()
     display.println("Standing by...");
     display.display();
     delay(2000);
+    reset_health();
 
     current_state = STATE_INIT;
 }
@@ -193,7 +191,7 @@ uint32_t get_chip_id()
 String get_name(uint32_t uuid)
 {
     // These two need to be kept in sync!
-    String names = "alpha,bravo,charlie,delta,echo";
+    String names = ",alpha,bravo,charlie,delta,echo";
     int name_start_idx = 0;
     int name_end_idx = 0;
     // Count how many names are defined
@@ -228,7 +226,7 @@ String get_name(uint32_t uuid)
     return name;
 }
 
-void update_ui(int last_rssi, String last_packet)
+void update_ui(int last_rssi, String display_message)
 {
     display.clearDisplay();
     display.setTextSize(1);
@@ -242,21 +240,27 @@ void update_ui(int last_rssi, String last_packet)
     {
         display.print("<3 ");
     }
+    if (my_health == 0)
+    {
+        display.print("dead!");
+    }
     display.println("");
     display.print("Last RSSI: ");
     display.println(last_rssi);
-    display.println(last_packet);
+    display.println("<: End game  >: Tag  ");
+    display.println("^:           v:      ");
+    display.println(display_message);
     display.display();
 
-    if (my_health > 0) // Still alive
-    {
-        pixels.setPixelColor(0, pixels.Color(0, 32, 0));
-    }
-    else // dead
-    {
-        pixels.setPixelColor(0, pixels.Color(32, 0, 0));
-    }
-    pixels.show();
+    // if (my_health > 0) // Still alive
+    // {
+    //     pixels.setPixelColor(0, pixels.Color(0, 32, 0));
+    // }
+    // else // dead
+    // {
+    //     pixels.setPixelColor(0, pixels.Color(32, 0, 0));
+    // }
+    // pixels.show();
 }
 
 void state_machine_update()
@@ -290,27 +294,27 @@ void update_players(uint32_t other_id, int8_t other_health)
 */
 size_t cobsEncode(const void *data, size_t length, uint8_t *buffer)
 {
-  assert(data && buffer);
+    assert(data && buffer);
 
-  uint8_t *encode = buffer; // Encoded byte pointer
-  uint8_t *codep = encode++; // Output code pointer
-  uint8_t code = 1; // Code value
+    uint8_t *encode = buffer;  // Encoded byte pointer
+    uint8_t *codep = encode++; // Output code pointer
+    uint8_t code = 1;          // Code value
 
-  for (const uint8_t *byte = (const uint8_t *)data; length--; ++byte)
-  {
-    if (*byte) // Byte not zero, write it
-      *encode++ = *byte, ++code;
-
-    if (!*byte || code == 0xff) // Input is zero or block completed, restart
+    for (const uint8_t *byte = (const uint8_t *)data; length--; ++byte)
     {
-      *codep = code, code = 1, codep = encode;
-      if (!*byte || length)
-        ++encode;
-    }
-  }
-  *codep = code; // Write final code value
+        if (*byte) // Byte not zero, write it
+            *encode++ = *byte, ++code;
 
-  return (size_t)(encode - buffer);
+        if (!*byte || code == 0xff) // Input is zero or block completed, restart
+        {
+            *codep = code, code = 1, codep = encode;
+            if (!*byte || length)
+                ++encode;
+        }
+    }
+    *codep = code; // Write final code value
+
+    return (size_t)(encode - buffer);
 }
 
 /** COBS decode data from buffer
@@ -322,27 +326,139 @@ size_t cobsEncode(const void *data, size_t length, uint8_t *buffer)
 */
 size_t cobsDecode(const uint8_t *buffer, size_t length, void *data)
 {
-  assert(buffer && data);
+    assert(buffer && data);
 
-  const uint8_t *byte = buffer; // Encoded input byte pointer
-  uint8_t *decode = (uint8_t *)data; // Decoded output byte pointer
+    const uint8_t *byte = buffer;      // Encoded input byte pointer
+    uint8_t *decode = (uint8_t *)data; // Decoded output byte pointer
 
-  for (uint8_t code = 0xff, block = 0; byte < buffer + length; --block)
-  {
-    if (block) // Decode block byte
-      *decode++ = *byte++;
-    else
+    for (uint8_t code = 0xff, block = 0; byte < buffer + length; --block)
     {
-      block = *byte++;             // Fetch the next block length
-      if (block && (code != 0xff)) // Encoded zero, write it unless it's delimiter.
-        *decode++ = 0;
-      code = block;
-      if (!code) // Delimiter code found
-        break;
+        if (block) // Decode block byte
+            *decode++ = *byte++;
+        else
+        {
+            block = *byte++;             // Fetch the next block length
+            if (block && (code != 0xff)) // Encoded zero, write it unless it's delimiter.
+                *decode++ = 0;
+            code = block;
+            if (!code) // Delimiter code found
+                break;
+        }
     }
-  }
 
-  return (size_t)(decode - (uint8_t *)data);
+    return (size_t)(decode - (uint8_t *)data);
+}
+
+void serialPrintPacket(Packet serdes)
+{
+    Serial.print("Header: ");
+    Serial.println(serdes.header_sync, HEX);
+    Serial.print("Src ID: ");
+    Serial.println(serdes.src_id);
+    Serial.print("Dst ID: ");
+    Serial.println(serdes.dst_id);
+    Serial.print("Oth ID: ");
+    Serial.println(serdes.other_id);
+    Serial.print("Seq num: ");
+    Serial.println(serdes.sequence_num);
+    Serial.print("Game num: ");
+    Serial.println(serdes.game_number);
+    Serial.print("Action: ");
+    switch (serdes.action)
+    {
+    case ACTION_UNKNOWN:
+        Serial.println("UNKNOWN");
+        break;
+    case ACTION_HEARTBEAT:
+        Serial.println("HEARTBEAT");
+        break;
+    case ACTION_TAG:
+        Serial.println("TAG");
+        break;
+    case ACTION_ACK:
+        Serial.println("ACK");
+        break;
+    case ACTION_NACK:
+        Serial.println("NACK");
+        break;
+    case ACTION_ITEM_POKE:
+        Serial.println("ITEM_POKE");
+        break;
+    case ACTION_ITEM_ACK:
+        Serial.println("ITEM_ACK");
+        break;
+    default:
+        Serial.println(serdes.action);
+    }
+    Serial.print("Src health: ");
+    Serial.println(serdes.src_health);
+    Serial.print("Oth health: ");
+    Serial.println(serdes.other_health);
+    Serial.print("Red: ");
+    Serial.println(serdes.red);
+    Serial.print("Grn: ");
+    Serial.println(serdes.green);
+    Serial.print("Blu: ");
+    Serial.println(serdes.blue);
+    Serial.print("Source name: ");
+    Serial.println(String((char *)(serdes.name)));
+    Serial.println("");
+}
+
+void take_hit()
+{
+    my_red = max(0xFF, my_red + 85);
+    my_green = min(0, my_green - 85);
+    my_health--;
+    pixels.setPixelColor(0, pixels.Color(my_red, my_green, my_blue));
+    pixels.show();
+}
+
+void reset_health()
+{
+    my_health = FULL_HEALTH;
+    my_red = 0;
+    my_green = 0xFF;
+    my_blue = 0;
+    pixels.setPixelColor(0, pixels.Color(my_red, my_green, my_blue));
+    pixels.show();
+    update_ui(0, "Lets go!");
+}
+
+void tx_packet(uint8_t action, uint32_t dest)
+{
+    Packet serdes;
+    serdes.header_sync = PACKET_HEADER_SYNC;
+    serdes.src_id = my_id;
+    serdes.dst_id = dest;
+    serdes.other_id = 0xFACECAFE;
+    serdes.sequence_num = tx_sequence_num++;
+    serdes.game_number = game_number;
+    serdes.action = action;
+    serdes.src_health = my_health;
+    serdes.other_health = -1;
+    serdes.red = 0xFF;
+    serdes.green = 0xFF;
+    serdes.blue = 0xFF;
+    my_name.getBytes((byte *)(serdes.name), MAX_NAME_LEN);
+    serdes.null_term = '\0';
+    uint8_t buffer[sizeof(Packet) + 2];
+    int num_bytes_encoded = cobsEncode((void *)(&serdes), sizeof(Packet), buffer);
+    if (num_bytes_encoded != sizeof(Packet) + 1)
+    {
+        Serial.print("COBS encoded to ");
+        Serial.print(num_bytes_encoded);
+        Serial.print(" bytes, expected ");
+        Serial.println(sizeof(Packet));
+    }
+    // Null-terminate the packet
+    buffer[sizeof(Packet) + 1] = '\0';
+    String message = String((char *)buffer);
+
+    // Send packet via LoRa
+    LoRa.beginPacket();
+    LoRa.print(message);
+    LoRa.endPacket();
 }
 
 void rx_packets()
@@ -352,8 +468,8 @@ void rx_packets()
     if (packetSize)
     {
         // Red color when a message is received
-        pixels.setPixelColor(0, pixels.Color(255, 0, 0));
-        pixels.show();
+        // pixels.setPixelColor(0, pixels.Color(255, 0, 0));
+        // pixels.show();
         while (LoRa.available())
         {
             lora_data = LoRa.readString();
@@ -364,133 +480,79 @@ void rx_packets()
             update_ui(num_packets_received, "Got a packet");
 
             Serial.println("Got a packet!");
-            for(int c = 0; c < lora_data.length(); c++){
-                Serial.print(lora_data[c], HEX);
-            }
-            Serial.println("");
+            // for (int c = 0; c < lora_data.length(); c++)
+            // {
+            //     Serial.print(lora_data[c], HEX);
+            // }
+            // Serial.println("");
             Serial.print("RSSI: ");
             Serial.println(packet_rssi);
-            Serial.print("Length: ");
-            Serial.println(lora_data.length());
+            // Serial.print("Length: ");
+            // Serial.println(lora_data.length());
 
-            PacketSerdes serdes;
-            if (lora_data.length() != sizeof(PacketSerdes) + 1)
+            if (lora_data.length() != sizeof(Packet) + 1)
             {
-                update_ui(lora_data.length(), "Packet Wrong Size");
+                // update_ui(lora_data.length(), "Packet Wrong Size");
                 continue;
             }
 
-            uint8_t buffer[sizeof(PacketSerdes) + 2];
-            lora_data.getBytes(buffer, sizeof(PacketSerdes) + 2);
-            int num_bytes_decoded = cobsDecode(buffer, sizeof(PacketSerdes) + 1, (void *)(serdes.bytes));
-            Serial.print("Decoded ");
-            Serial.print(num_bytes_decoded);
-            Serial.println(" bytes");
+            uint8_t buffer[sizeof(Packet) + 2];
+            lora_data.getBytes(buffer, sizeof(Packet) + 2);
+            Packet serdes;
+            int num_bytes_decoded = cobsDecode(buffer, sizeof(Packet) + 1, (void *)(&serdes));
+            // Serial.print("Decoded ");
+            // Serial.print(num_bytes_decoded);
+            // Serial.println(" bytes");
 
-            Serial.print("Header: ");
-            Serial.println(serdes.frame.header_sync, HEX);
-            Serial.print("Src ID: ");
-            Serial.println(serdes.frame.src_id);
-            Serial.print("Dst ID: ");
-            Serial.println(serdes.frame.dst_id);
-            Serial.print("Oth ID: ");
-            Serial.println(serdes.frame.other_id);
-            Serial.print("Seq num: ");
-            Serial.println(serdes.frame.sequence_num);
-            Serial.print("Game num: ");
-            Serial.println(serdes.frame.game_number);
-            Serial.print("Action: ");
-            switch(serdes.frame.action) {
-                case ACTION_UNKNOWN:
-                    Serial.println("UNKNOWN");
-                    break;
-                case ACTION_HEARTBEAT:
-                    Serial.println("HEARTBEAT");
-                    break;
-                case ACTION_TAG:
-                    Serial.println("TAG");
-                    break;
-                case ACTION_ACK:
-                    Serial.println("ACK");
-                    break;
-                case ACTION_NACK:
-                    Serial.println("NACK");
-                    break;
-                case ACTION_ITEM_POKE:
-                    Serial.println("ITEM_POKE");
-                    break;
-                case ACTION_ITEM_ACK:
-                    Serial.println("ITEM_ACK");
-                    break;
-                default:
-                    Serial.println(serdes.frame.action);
-            }
-            Serial.print("Src health: ");
-            Serial.println(serdes.frame.src_health);
-            Serial.print("Oth health: ");
-            Serial.println(serdes.frame.other_health);
-            Serial.print("Red: ");
-            Serial.println(serdes.frame.red);
-            Serial.print("Grn: ");
-            Serial.println(serdes.frame.green);
-            Serial.print("Blu: ");
-            Serial.println(serdes.frame.blue);
-
-            if (serdes.frame.header_sync != PACKET_HEADER_SYNC)
+            if (serdes.header_sync != PACKET_HEADER_SYNC)
             {
-                update_ui(0, "Wrong header");
+                // update_ui(0, "Wrong header");
                 continue;
             }
-            if (game_number != serdes.frame.game_number)
+            if (my_id == serdes.src_id)
+            {
+                // Ignore my own packets
+                continue;
+            }
+            if (game_number != serdes.game_number)
             {
                 if (game_number == 0)
                 {
-                    game_number = serdes.frame.game_number;
+                    game_number = serdes.game_number;
                 }
                 else
                 {
-                    update_ui(serdes.frame.game_number, "Unknown game number");
+                    // update_ui(serdes.game_number, "Unknown game number");
                     continue;
+                }
+            }
+
+            String src_name = String((char *)(serdes.name));
+
+            if (serdes.action != ACTION_HEARTBEAT)
+            {
+                serialPrintPacket(serdes);
+            }
+            if (serdes.action == ACTION_TAG)
+            {
+                if (packet_rssi > -1 * my_range)
+                {
+                    // I've been tagged!
+                    take_hit();
+                    tx_packet(ACTION_ACK, serdes.src_id);
+                    String message = String("Tagged by ");
+                    message.concat(src_name);
+                    Serial.println(message);
+                    update_ui(packet_rssi, message);
                 }
             }
         }
     }
 }
 
-void tx_packet()
+void send_tag(uint32_t target)
 {
-    PacketSerdes serdes;
-    serdes.frame.header_sync = PACKET_HEADER_SYNC;
-    serdes.frame.src_id = my_id;
-    serdes.frame.dst_id = 0xDEADBEEF;
-    serdes.frame.other_id = 0xFACECAFE;
-    serdes.frame.sequence_num = tx_sequence_num++;
-    serdes.frame.game_number = game_number;
-    serdes.frame.action = ACTION_HEARTBEAT;
-    serdes.frame.src_health = my_health;
-    serdes.frame.other_health = -1;
-    serdes.frame.red = 0xFF;
-    serdes.frame.green = 0xFF;
-    serdes.frame.blue = 0xFF;
-//    my_name.getBytes(serdes.frame.name, 8);
-    serdes.frame.null_term = '\0';
-    // char packet[sizeof(PacketSerdes)]
-    uint8_t buffer[sizeof(PacketSerdes) + 2];
-    int num_bytes_encoded = cobsEncode((void *)(serdes.bytes), sizeof(PacketSerdes), buffer);
-    if (num_bytes_encoded != sizeof(PacketSerdes) + 1) {
-        Serial.print("COBS encoded to ");
-        Serial.print(num_bytes_encoded);
-        Serial.print(" bytes, expected ");
-        Serial.println(sizeof(PacketSerdes));
-    }
-    // Null-terminate the packet
-    buffer[sizeof(PacketSerdes) + 1] = '\0';
-    String message = String((char *)buffer);
-
-    // Send packet via LoRa
-    LoRa.beginPacket();
-    LoRa.print(message);
-    LoRa.endPacket();
+    tx_packet(ACTION_TAG, target);
 }
 
 int tx_counter = 0;
@@ -500,10 +562,21 @@ void loop()
 {
     // Read buttons
     // if(last_button == 0 && digitalRead(BTN_UP))
-    if (tx_counter % tx_decimator == 0) {
-      tx_packet(); 
+    if (tx_counter % tx_decimator == 0)
+    {
+        tx_packet(ACTION_HEARTBEAT, 0);
     }
+    tx_counter++;
+
+    if (!digitalRead(BTN_RIGHT) && my_health > 0)
+    {
+        send_tag(123456789);
+    }
+    if (!digitalRead(BTN_LEFT))
+    {
+        reset_health();
+    }
+
     rx_packets();
     delay(100);
-    tx_counter++;
 }
