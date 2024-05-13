@@ -8,7 +8,9 @@
             "intelliSenseMode": "windows-msvc-x64",
             "includePath": [
                 "${workspaceFolder}/**",
-                "D:\\documents\\Arduino\\libraries\\**"
+                "D:\\documents\\Arduino\\libraries\\**",
+                "D:\\projects\\build\\libraries\\**",
+                "C:\\Users\\quant\\AppData\\Local\\Arduino15\\packages\\**"
             ],
             "forcedInclude": [],
             "cStandard": "c17",
