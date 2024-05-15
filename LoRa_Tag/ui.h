@@ -1,3 +1,5 @@
+#pragma once
+
 #include <Adafruit_NeoPixel.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -150,8 +152,8 @@ void update_ui(int last_rssi, String display_message, int8_t health, uint8_t gam
     display.print(game_number);
     display.print(" RSSI: ");
     display.println(last_rssi);
-    display.println("<: End game  >: Tag  ");
-    display.println("^:           v:      ");
+    display.println("<: Heal me  >: Tag   ");
+    display.println("^:          v:       ");
     display.println(display_message);
     display.display();
 }

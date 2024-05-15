@@ -2,6 +2,8 @@
  *  stolen from https://en.wikipedia.org/wiki/Consistent_Overhead_Byte_Stuffing
  */
 
+#pragma once
+
 /** COBS encode data to buffer
   @param data Pointer to input data to encode
   @param length Number of bytes to encode

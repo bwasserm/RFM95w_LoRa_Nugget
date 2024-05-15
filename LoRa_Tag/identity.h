@@ -2,6 +2,8 @@
  * Identity of this nugget, both ID number and Name.
  */
 
+#pragma once
+
 #define MAX_NAME_LEN 8
 
 uint32_t my_id = 0;
