@@ -26,7 +26,7 @@ uint32_t get_chip_id()
 String get_name(uint32_t uuid)
 {
     // These two need to be kept in sync!
-    String names = ",alpha,bravo,charlie,delta,echo";
+    String names = ",alpha,bravo,charlie,delta,echo,fox,golf,hotel,india,juliet,kilo,lima,mike,nov,oscar,papa,quebec,romeo,sierra,tango,uni,victor,yankee,zulu";
     int name_start_idx = 0;
     int name_end_idx = 0;
     // Count how many names are defined

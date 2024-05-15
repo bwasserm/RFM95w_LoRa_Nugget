@@ -367,11 +367,11 @@ void loop()
     }
     tx_counter++;
 
-    if (!digitalRead(BTN_RIGHT) && my_health > 0)
+    if (was_right_pressed() && my_health > 0)
     {
         send_tag(123456789);
     }
-    if (!digitalRead(BTN_LEFT))
+    if (was_left_pressed())
     {
         reset_health();
     }

@@ -55,14 +55,77 @@ void show_boot_display(String my_name)
     display.display();
 }
 
+bool up_pressed = false;
+bool down_pressed = false;
+bool left_pressed = false;
+bool right_pressed = false;
+
+void press_up()
+{
+    up_pressed = true;
+}
+
+void press_down()
+{
+    down_pressed = true;
+}
+
+void press_left()
+{
+    left_pressed = true;
+}
+
+void press_right()
+{
+    right_pressed = true;
+}
+
 void init_buttons()
 {
     pinMode(BTN_UP, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BTN_UP), press_up, FALLING);
     pinMode(BTN_DOWN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BTN_DOWN), press_down, FALLING);
     pinMode(BTN_LEFT, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BTN_LEFT), press_left, FALLING);
     pinMode(BTN_RIGHT, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BTN_RIGHT), press_right, FALLING);
+    up_pressed = false;
+    down_pressed = false;
+    left_pressed = false;
+    right_pressed = false;
 }
 
+/*
+ * These functions check if the button was pressed and reset it's state to unpressed.
+ */
+bool was_up_pressed()
+{
+    bool pressed = up_pressed;
+    up_pressed = false;
+    return pressed;
+}
+
+bool was_down_pressed()
+{
+    bool pressed = down_pressed;
+    down_pressed = false;
+    return pressed;
+}
+
+bool was_left_pressed()
+{
+    bool pressed = left_pressed;
+    left_pressed = false;
+    return pressed;
+}
+
+bool was_right_pressed()
+{
+    bool pressed = right_pressed;
+    right_pressed = false;
+    return pressed;
+}
 
 void update_ui(int last_rssi, String display_message, int8_t health, uint8_t game_number)
 {
