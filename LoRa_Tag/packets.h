@@ -93,17 +93,28 @@ void tx_packet(uint8_t action, uint32_t dest, int8_t my_health, uint8_t game_num
     serdes.header_sync = PACKET_HEADER_SYNC;
     serdes.src_id = my_id;
     serdes.dst_id = dest;
-    serdes.other_id = 0xFACECAFE;
     serdes.sequence_num = tx_sequence_num++;
     serdes.game_number = game_number;
     serdes.action = action;
     serdes.src_health = my_health;
-    serdes.other_health = -1;
     serdes.red = 0xFF;
     serdes.green = 0xFF;
     serdes.blue = 0xFF;
     my_name.getBytes((byte *)(serdes.name), MAX_NAME_LEN);
     serdes.null_term = '\0';
+
+    Player other_player;
+    if (get_next_player(&other_player))
+    {
+        serdes.other_id = other_player.id;
+        serdes.other_health = other_player.health;
+    }
+    else
+    {
+        serdes.other_id = 0;
+        serdes.other_health = 0;
+    }
+
     uint8_t buffer[sizeof(Packet) + 2];
     int num_bytes_encoded = cobsEncode((void *)(&serdes), sizeof(Packet), buffer);
     if (num_bytes_encoded != sizeof(Packet) + 1)

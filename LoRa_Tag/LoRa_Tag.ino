@@ -6,18 +6,11 @@
 #include "packets.h"
 #include "game_state.h"
 
-// States
-#define STATE_INIT 0
-#define STATE_GAME_SEARCH 1
-#define STATE_PLAYING 2
-#define STATE_TAGGING 3
-
-
 void setup()
 {
     // Initialize Serial Monitor
     Serial.begin(9600);
-    while (!Serial);
+    // while (!Serial);
     Serial.println("Nugget LoRa Tag");
 
     init_lora();
@@ -31,29 +24,10 @@ void setup()
     init_buttons();
     init_display();
     show_boot_display(my_name);
-
-    delay(2000);
     reset_health();
+    reset_players();
 
     current_state = STATE_INIT;
-}
-
-
-void state_machine_update()
-{
-    switch (current_state)
-    {
-    case STATE_INIT:
-        break;
-    case STATE_GAME_SEARCH:
-        break;
-    case STATE_PLAYING:
-        break;
-    case STATE_TAGGING:
-        break;
-    default:
-        break;
-    }
 }
 
 void take_hit()
@@ -74,7 +48,8 @@ void reset_health()
     pixels.setPixelColor(0, pixels.Color(my_red, my_green, my_blue));
     pixels.show();
     // game_number++;
-    update_ui(0, "Lets go!", my_health, game_number);
+    update_ui(0, "Health reset", my_health, game_number);
+    reset_players();
 }
 
 void rx_packets()
@@ -114,9 +89,9 @@ void rx_packets()
             lora_data.getBytes(buffer, sizeof(Packet) + 2);
             Packet serdes;
             int num_bytes_decoded = cobsDecode(buffer, sizeof(Packet) + 1, (void *)(&serdes));
-            // Serial.print("Decoded ");
-            // Serial.print(num_bytes_decoded);
-            // Serial.println(" bytes");
+            Serial.print("Decoded ");
+            Serial.print(num_bytes_decoded);
+            Serial.println(" bytes");
 
             if (serdes.header_sync != PACKET_HEADER_SYNC)
             {
@@ -137,6 +112,20 @@ void rx_packets()
                 {
                     continue;
                 }
+            }
+
+            update_players(serdes.src_id, serdes.src_health);
+            if (serdes.other_id != my_id)
+            {
+                update_players(serdes.other_id, serdes.other_health);
+            }
+            else if (current_state == STATE_INIT)
+            {
+                my_health = serdes.other_health;
+                my_green = my_health * 85;
+                my_red = 0xFF - my_green;
+                current_state = STATE_PLAYING;
+                update_ui(0, "Health restored", my_health, game_number);
             }
 
             String src_name = String((char *)(serdes.name));
@@ -165,6 +154,14 @@ void rx_packets()
                     update_ui(packet_rssi, message, my_health, game_number);
                 }
             }
+            if (serdes.action == ACTION_ACK && serdes.dst_id == my_id)
+            {
+                String message = String("You got ");
+                message.concat(src_name);
+                message.concat("!");
+                Serial.println(message);
+                update_ui(packet_rssi, message, my_health, game_number);
+            }
         }
     }
 }
@@ -176,26 +173,44 @@ void send_tag(uint32_t target)
 
 int tx_counter = 0;
 int tx_decimator = 10;
+int cycle_counter = 0;
+int cycle_tag_sent = 0;
+#define CYCLES_BETWEEN_TAGS 30
 
 void loop()
 {
     // Read buttons
     // if(last_button == 0 && digitalRead(BTN_UP))
-    if (tx_counter % tx_decimator == 0)
+    if (tx_counter % tx_decimator == 0 && current_state == STATE_PLAYING)
     {
         tx_packet(ACTION_HEARTBEAT, 0, my_health, game_number);
     }
     tx_counter++;
 
-    if (was_right_pressed() && my_health > 0)
+    if (was_right_pressed() && my_health > 0 && current_state == STATE_PLAYING)
     {
-        send_tag(123456789);
+        send_tag(0);
+        current_state = STATE_TAGGING;
+        cycle_tag_sent = cycle_counter;
+        update_ui(0, "Tag sent!", my_health, game_number);
     }
     if (was_left_pressed())
     {
         reset_health();
     }
 
+    if (current_state == STATE_INIT && cycle_counter > 50)
+    {
+        current_state = STATE_PLAYING;
+        update_ui(0, "Lets go!", my_health, game_number);
+    }
+    if (current_state == STATE_TAGGING && cycle_counter - cycle_tag_sent > CYCLES_BETWEEN_TAGS)
+    {
+        current_state = STATE_PLAYING;
+        update_ui(0, "Go go go", my_health, game_number);
+    }
+
     rx_packets();
     delay(100);
+    cycle_counter++;
 }
